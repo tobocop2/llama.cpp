@@ -1,0 +1,76 @@
+name: sync-upstream
+
+# Keeps the fork's master current: master IS the integration branch (latest
+# ggml-org/llama.cpp with the GET /memory work merged in). Each run merges
+# upstream master in, proves the result compiles, pushes, and tags the state
+# immutably for lilbee's engine pin. Pushes use a deploy key (SYNC_SSH_KEY
+# secret): the Actions GITHUB_TOKEN cannot push workflow-file changes, which
+# upstream merges carry.
+#
+# feat/server-memory-metrics (the branch behind upstream PR 26130) is never
+# touched here: pushing it re-triggers ggml-org CI and pings maintainers.
+on:
+  schedule:
+    - cron: "0 8 * * 1"   # Mondays 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.SYNC_SSH_KEY }}
+          ref: master
+          fetch-depth: 0
+
+      - name: Merge upstream master into the fork's master
+        run: |
+          git config user.name "fork-sync"
+          git config user.email "fork-sync@users.noreply.github.com"
+          git remote add upstream https://github.com/ggml-org/llama.cpp
+          git fetch upstream master
+          if ! git merge --no-edit upstream/master; then
+            echo "merge conflicts with upstream master in:" >&2
+            git diff --name-only --diff-filter=U >&2
+            git merge --abort
+            exit 1
+          fi
+
+      - name: Prove the merged master compiles
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON -DLLAMA_CURL=OFF
+          cmake --build build --target llama-server -j "$(nproc)"
+
+      - name: Push master and tag the state for pins
+        # The tag is immutable on purpose: lilbee's engine pin and its build
+        # caches key on the tag NAME, so a tag that moves lets two different
+        # trees alias one identity. Time-stamped names never collide.
+        run: |
+          git push origin master
+          tag="memory-$(date -u +%Y%m%d-%H%M%S)"
+          git tag "$tag" master
+          git push origin "$tag"
+          echo "synced master to upstream $(git rev-parse --short upstream/master), tagged $tag"
+
+      - name: File an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
+            --search "sync-upstream failed in:title" --json number --jq length)
+          if [ "$existing" = "0" ]; then
+            gh issue create -R "$GITHUB_REPOSITORY" \
+              --title "sync-upstream failed: master needs a hand" \
+              --body "The scheduled sync could not merge upstream into master or the merged result did not compile. Fix by hand, push master, and the next run resumes. Failed run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
