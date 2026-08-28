@@ -35,8 +35,11 @@ jobs:
 
       - name: Merge upstream master into the fork's master
         run: |
-          git config user.name "fork-sync"
-          git config user.email "fork-sync@users.noreply.github.com"
+          # Use the Actions bot identity. A bare "name@users.noreply.github.com"
+          # is reserved by GitHub for the account of that name, so an unrelated
+          # user is credited on every merge this job makes.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/ggml-org/llama.cpp
           git fetch upstream master
           if ! git merge --no-edit upstream/master; then
