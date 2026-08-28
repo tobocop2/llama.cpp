@@ -2,10 +2,10 @@ name: sync-upstream
 
 # Keeps the fork's master current: master IS the integration branch (latest
 # ggml-org/llama.cpp with the GET /memory work merged in). Each run merges
-# upstream master in, proves the result compiles, pushes, and tags the state
-# immutably for lilbee's engine pin. Pushes use a deploy key (SYNC_SSH_KEY
-# secret): the Actions GITHUB_TOKEN cannot push workflow-file changes, which
-# upstream merges carry.
+# upstream master in, proves the result compiles and passes the server tests,
+# pushes, and tags the state immutably for lilbee's engine pin. Pushes use a
+# deploy key (SYNC_SSH_KEY secret): the Actions GITHUB_TOKEN cannot push
+# workflow-file changes, which upstream merges carry.
 #
 # feat/server-memory-metrics (the branch behind upstream PR 26130) is never
 # touched here: pushing it re-triggers ggml-org CI and pings maintainers.
@@ -50,6 +50,18 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON -DLLAMA_CURL=OFF
           cmake --build build --target llama-server -j "$(nproc)"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          pip-install: -r tools/server/tests/requirements.txt
+
+      # compiling is not enough: an upstream refactor can merge and build clean and
+      # still break the memory endpoints. these tests are the gate that catches it.
+      - name: Prove the server still behaves
+        run: |
+          cd tools/server/tests
+          ./tests.sh
 
       - name: Push master and tag the state for pins
         # The tag is immutable on purpose: lilbee's engine pin and its build
