@@ -1,5 +1,6 @@
 #include "fit.h"
 
+#include "json.h"
 #include "log.h"
 
 #include "../src/llama-ext.h"
@@ -989,6 +990,9 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
 
     std::vector<std::array<std::string, 9>> table_data;
     table_data.reserve(rows.size() + 1);
+
+    // same data as the table below, for --log-jsonl consumers
+    common_json json_rows = common_json::array();
     const std::string template_header = "%s: | %s | %s   %s    %s   %s   %s   %s    %s |\n";
     const std::string template_gpu    = "%s: | %s | %s = %s + (%s = %s + %s + %s) + %s |\n";
     const std::string template_other  = "%s: | %s | %s   %s    %s = %s + %s + %s    %s |\n";
@@ -997,6 +1001,9 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
 
     constexpr size_t MiB = 1024 * 1024;
     const std::vector<std::string> desc_prefixes_strip = {"NVIDIA ", "GeForce ", "Tesla ", "AMD ", "Radeon ", "Instinct "};
+
+    // common_memory_breakdown_get emits the host row directly after the devices
+    bool seen_host = false;
 
     for (const common_memory_breakdown_row & row : rows) {
         const common_device_memory_data & mem = row.mem;
@@ -1014,6 +1021,16 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
                 std::to_string(mem.context / MiB),
                 std::to_string(mem.compute / MiB),
                 ""}); // unaccounted
+
+            json_rows.push_back({
+                {"kind",    seen_host ? "buffer_type" : "host"},
+                {"name",    row.name},
+                {"self",    self / MiB},
+                {"model",   mem.model / MiB},
+                {"context", mem.context / MiB},
+                {"compute", mem.compute / MiB},
+            });
+            seen_host = true;
             continue;
         }
 
@@ -1036,6 +1053,19 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
             std::to_string(mem.context / MiB),
             std::to_string(mem.compute / MiB),
             std::to_string(unaccounted / static_cast<int64_t>(MiB))});
+
+        json_rows.push_back({
+            {"kind",        "device"},
+            {"name",        row.name},
+            {"description", desc},
+            {"total",       mem.total / static_cast<int64_t>(MiB)},
+            {"free",        mem.free  / static_cast<int64_t>(MiB)},
+            {"self",        self / MiB},
+            {"model",       mem.model / MiB},
+            {"context",     mem.context / MiB},
+            {"compute",     mem.compute / MiB},
+            {"unaccounted", unaccounted / static_cast<int64_t>(MiB)},
+        });
     }
 
     for (size_t j = 1; j < table_data[0].size(); j++) {
@@ -1052,6 +1082,11 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
             __func__, td[1].c_str(), td[2].c_str(), td[3].c_str(), td[4].c_str(), td[5].c_str(),
             td[6].c_str(), td[7].c_str(), td[8].c_str());
     }
+
+    LOG_JSON("fit_memory_breakdown", common_json({
+        {"unit", "MiB"},
+        {"rows", json_rows},
+    }));
 }
 
 void common_fit_print(
