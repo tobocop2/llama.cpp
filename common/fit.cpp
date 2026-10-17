@@ -990,9 +990,6 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
 
     std::vector<std::array<std::string, 9>> table_data;
     table_data.reserve(rows.size() + 1);
-
-    // same data as the table below, for --log-jsonl consumers
-    common_json json_rows = common_json::array();
     const std::string template_header = "%s: | %s | %s   %s    %s   %s   %s   %s    %s |\n";
     const std::string template_gpu    = "%s: | %s | %s = %s + (%s = %s + %s + %s) + %s |\n";
     const std::string template_other  = "%s: | %s | %s   %s    %s = %s + %s + %s    %s |\n";
@@ -1002,8 +999,8 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
     constexpr size_t MiB = 1024 * 1024;
     const std::vector<std::string> desc_prefixes_strip = {"NVIDIA ", "GeForce ", "Tesla ", "AMD ", "Radeon ", "Instinct "};
 
-    // common_memory_breakdown_get emits the host row directly after the devices
-    bool seen_host = false;
+    // same data as the table below, for --log-jsonl consumers
+    common_json json_rows = common_json::array();
 
     for (const common_memory_breakdown_row & row : rows) {
         const common_device_memory_data & mem = row.mem;
@@ -1021,16 +1018,25 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
                 std::to_string(mem.context / MiB),
                 std::to_string(mem.compute / MiB),
                 ""}); // unaccounted
-
-            json_rows.push_back({
-                {"kind",    seen_host ? "buffer_type" : "host"},
-                {"name",    row.name},
-                {"self",    self / MiB},
-                {"model",   mem.model / MiB},
-                {"context", mem.context / MiB},
-                {"compute", mem.compute / MiB},
-            });
-            seen_host = true;
+            if (row.name == "Host") {
+                json_rows.push_back({
+                    {"kind",    "host"},
+                    {"name",    "Host"},
+                    {"self",    self / MiB},
+                    {"model",   mem.model / MiB},
+                    {"context", mem.context / MiB},
+                    {"compute", mem.compute / MiB},
+                });
+            } else {
+                json_rows.push_back({
+                    {"kind",    "buffer_type"},
+                    {"name",    row.name},
+                    {"self",    self / MiB},
+                    {"model",   mem.model / MiB},
+                    {"context", mem.context / MiB},
+                    {"compute", mem.compute / MiB},
+                });
+            }
             continue;
         }
 
