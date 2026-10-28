@@ -46,6 +46,47 @@ void common_fit_print(
 
 void common_memory_breakdown_print(const llama_context * ctx);
 
+// one row of the memory breakdown: a device, the host or another buffer type
+struct common_memory_breakdown_row {
+    enum kind_t { DEVICE, HOST, BUFFER_TYPE };
+
+    kind_t      kind = DEVICE;
+    std::string name;        // device or buffer type name, "Host" for the host row
+    std::string description; // device description, empty otherwise
+    int64_t     total = 0;   // device memory in bytes, 0 unless kind == DEVICE
+    int64_t     free  = 0;   // free device memory in bytes, 0 unless kind == DEVICE
+    size_t      model   = 0; // bytes held by this context, by kind of buffer
+    size_t      context = 0;
+    size_t      compute = 0;
+};
+
+// memory a model needs at the min and max context --fit may pick
+struct common_memory_reports {
+    uint32_t n_ctx_train = 0;
+    uint32_t n_ctx_max   = 0; // the largest context that fits the free device memory right now
+    uint32_t n_ctx_min   = 0; // --fit-ctx (the smallest context --fit may pick), with the placement set in params
+    std::vector<common_memory_breakdown_row> info_max; // breakdown at n_ctx_max
+    std::vector<common_memory_breakdown_row> info_min; // breakdown at n_ctx_min
+};
+
+// rows of common_memory_breakdown_print: model devices first, then host
+std::vector<common_memory_breakdown_row> common_memory_breakdown_rows(const llama_context * ctx);
+
+// load model + context with no_alloc and return the memory breakdown, params are used as-is
+// n_ctx_train and n_ctx are optional outputs; throws on failure
+std::vector<common_memory_breakdown_row> common_fit_measure(
+                         const char * path_model,
+           const llama_model_params * mparams,
+         const llama_context_params * cparams,
+                           uint32_t * n_ctx_train,
+                           uint32_t * n_ctx,
+                     ggml_log_level   log_level);
+
+struct common_params;
+
+// measure min and max without allocating, params may be modified as with --fit; throws on failure
+common_memory_reports common_measure_memory(common_params & params);
+
 struct common_device_memory_data {
     int64_t total;
     int64_t free;
@@ -55,19 +96,6 @@ struct common_device_memory_data {
 };
 
 using common_device_memory_data_vec = std::vector<common_device_memory_data>;
-
-// one line of the memory breakdown: a device the model is using, the host, or a buffer type belonging to neither
-struct common_memory_breakdown_row {
-    std::string name;        // ggml_backend_dev_name, "Host", or ggml_backend_buft_name
-    std::string description; // device description, empty on the other rows
-    bool        is_device = false; // total and free are only meaningful when true
-
-    common_device_memory_data mem = {};
-};
-
-// memory ctx has allocated, in the rows common_memory_breakdown_print renders
-// note: the measured counterpart of common_get_device_memory_data below, which projects the same figures from a no_alloc load
-std::vector<common_memory_breakdown_row> common_memory_breakdown_get(const llama_context * ctx);
 
 // Load a model + context with no_alloc and return the per-device memory breakdown.
 common_device_memory_data_vec common_get_device_memory_data(
