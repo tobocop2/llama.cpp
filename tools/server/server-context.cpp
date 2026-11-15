@@ -1077,7 +1077,8 @@ public:
         std::map<std::string, size_t> mmproj_mem;
         if (mctx) {
             for (const auto & [dev, size] : mtmd_get_ctx_memory_usage(mctx)) {
-                const bool is_host = ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU;
+                // the weights of a host buffer type carry no device
+                const bool is_host = dev == nullptr || ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU;
                 mmproj_mem[is_host ? "Host" : ggml_backend_dev_name(dev)] += size;
             }
         }
